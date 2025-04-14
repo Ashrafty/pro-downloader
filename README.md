@@ -77,7 +77,7 @@ The application is designed to work on multiple platforms:
 ### Setup
 1. Clone the repository
    ```
-   git clone <repository-url>
+   git clone <https://github.com/Ashrafty/pro-downloader.git>
    ```
 2. Navigate to the project directory
    ```
