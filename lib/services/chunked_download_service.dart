@@ -10,6 +10,7 @@ class ChunkedDownloadService {
   final Dio _dio = Dio();
   final Map<String, CancelToken> _cancelTokens = {};
   final Map<String, bool> _isPaused = {};
+  final Map<String, bool> _pauseRequests = {};
 
   // Get file information from URL
   Future<Map<String, dynamic>> getFileInfo(String url) async {
@@ -217,6 +218,12 @@ class ChunkedDownloadService {
           deleteOnError: false,
           options: options,
           onReceiveProgress: (received, total) {
+            // Check if a pause has been requested
+            if (_pauseRequests[downloadId] == true) {
+              cancelToken.cancel('Pause requested by user');
+              return;
+            }
+
             // Skip if download is paused
             if (_isPaused[downloadId] == true) {
               debugPrint('Download is paused, skipping progress update for ID: $downloadId');
@@ -320,6 +327,12 @@ class ChunkedDownloadService {
             receiveTimeout: const Duration(minutes: 30),
           ),
           onReceiveProgress: (received, total) {
+            // Check if a pause has been requested
+            if (_pauseRequests[downloadId] == true) {
+              cancelToken.cancel('Pause requested by user');
+              return;
+            }
+
             // Skip if download is paused
             if (_isPaused[downloadId] == true) {
               debugPrint('Download is paused (new file), skipping progress update for ID: $downloadId');
@@ -443,31 +456,31 @@ class ChunkedDownloadService {
     debugPrint('Current cancel tokens: ${_cancelTokens.keys.join(', ')}');
     debugPrint('Current paused downloads: ${_isPaused.keys.join(', ')}');
 
+    // Mark the pause request
+    _pauseRequests[id] = true;
+    debugPrint('Marked pause request for download: $id');
     // Mark the download as paused
     _isPaused[id] = true;
     debugPrint('Marked download as paused: $id');
 
     // Get the cancel token for this download
-    final cancelToken = _cancelTokens[id];
     if (cancelToken != null) {
-      debugPrint('Found cancel token for download: $id');
-
       if (!cancelToken.isCancelled) {
+        debugPrint('Found cancel token for download: $id');
         debugPrint('Cancel token is not yet cancelled, cancelling now');
-
         // Cancel the current download operation
-        try {
-          cancelToken.cancel('Download paused by user');
-          debugPrint('Successfully cancelled download operation for ID: $id');
-        } catch (e) {
-          debugPrint('Error cancelling download: $e');
-        }
-      } else {
+        cancelToken.cancel('Download paused by user');
+        debugPrint('Successfully cancelled download operation for ID: $id');
+      } else{
+
         debugPrint('Cancel token is already cancelled');
       }
     } else {
       debugPrint('No cancel token found for download ID: $id');
     }
+    
+    // Remove the pause request
+    _pauseRequests.remove(id);
 
     debugPrint('=== PAUSE DOWNLOAD COMPLETED ===');
   }
@@ -516,6 +529,7 @@ class ChunkedDownloadService {
     // Remove from maps
     _cancelTokens.remove(id);
     _isPaused.remove(id);
+    _pauseRequests.remove(id);
   }
 
   // Merge all chunks into the main file
@@ -526,11 +540,15 @@ class ChunkedDownloadService {
     final extension = path.extension(fileName);
 
     // Check if there are any chunks to merge
-    int i = 1;
-    String chunkPath = path.join(downloadLocation, '${baseName}_$i$extension');
-    File chunkFile = File(chunkPath);
+        int i = 1;
+        String chunkPath = path.join(downloadLocation, '${baseName}_$i$extension');
+        File chunkFile = File(chunkPath);
 
-    if (!await chunkFile.exists()) {
+        // Check for the first complete chunk, if none exist exit
+        String completeChunkPath = '$chunkPath.complete';
+        File completeChunkFile = File(completeChunkPath);
+
+    if (!await completeChunkFile.exists()) {
       // No chunks to merge
       return;
     }
@@ -539,18 +557,22 @@ class ChunkedDownloadService {
     final mainFileRaf = await mainFile.open(mode: FileMode.writeOnlyAppend);
 
     // Merge all chunks
-    while (await chunkFile.exists()) {
-      // Read chunk and append to main file
-      final chunkBytes = await chunkFile.readAsBytes();
-      await mainFileRaf.writeFrom(chunkBytes);
+        while (await completeChunkFile.exists()) {
+          // Read chunk and append to main file
+          final chunkBytes = await chunkFile.readAsBytes();
+          await mainFileRaf.writeFrom(chunkBytes);
 
-      // Delete the chunk
-      await chunkFile.delete();
+          // Delete the chunk and the complete marker
+          await chunkFile.delete();
+          await completeChunkFile.delete();
 
-      // Move to next chunk
-      i++;
-      chunkPath = path.join(downloadLocation, '${baseName}_$i$extension');
-      chunkFile = File(chunkPath);
+          // Move to next chunk
+          i++;
+          chunkPath = path.join(downloadLocation, '${baseName}_$i$extension');
+          chunkFile = File(chunkPath);
+          completeChunkPath = '$chunkPath.complete';
+          completeChunkFile = File(completeChunkPath);
+
     }
 
     // Close the main file

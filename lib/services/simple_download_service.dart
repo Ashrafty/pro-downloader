@@ -326,21 +326,13 @@ class SimpleDownloadService {
 
     // Get the cancel token for this download
     final cancelToken = _cancelTokens[id];
-    if (cancelToken != null) {
+    if (cancelToken != null && !cancelToken.isCancelled) {
       debugPrint('Found cancel token for download: $id');
 
-      if (!cancelToken.isCancelled) {
-        debugPrint('Cancel token is not yet cancelled, cancelling now');
-
-        // Cancel the current download operation
-        try {
-          cancelToken.cancel('Download paused by user');
-          debugPrint('Successfully cancelled download operation for ID: $id');
-        } catch (e) {
-          debugPrint('Error cancelling download: $e');
-        }
-      } else {
-        debugPrint('Cancel token is already cancelled');
+      try {
+        cancelToken.cancel('Download paused by user');
+      } catch (e) {
+        debugPrint('Error cancelling download: $e');
       }
     } else {
       debugPrint('No cancel token found for download ID: $id');
